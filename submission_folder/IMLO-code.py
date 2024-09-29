@@ -97,10 +97,21 @@ class Net(nn.Module):
         x = self.fc3(x)
 
         return x
-    
 
-# Function to set the optimizer, loss function and scheduler. Takes the model, learning rate and weight decay as params
+# train_new_model creates a new network and returns a trained model.
+def train_new_model():
+    net = Net(l1=400, l2=350)
 
+    optimizer, criterion, scheduler = optimLossSched(net, 0.001, 0.01)
+
+    # train the model with epoch number, model
+    net = train(2, net, optimizer, criterion, scheduler)
+    print('Finished Training') 
+
+    return net
+
+# optimLossSched takes the model, learning rate and weight decay as parameters
+# to then set and return the optimizer, loss function and scheduler.
 def optimLossSched(net, lr, wd):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
@@ -108,16 +119,82 @@ def optimLossSched(net, lr, wd):
 
     return optimizer, criterion, scheduler
 
-# Function to return the current learning rate. Used in testing.
-def get_lr(optimizer):
-    for param_group in optimizer.param_groups:
-        return param_group['lr']
+# train will train the model provided using a given optimizer, criterion
+# and scheduler for a given number of epochs. It returns the trained model.
+def train(epochs, model, optimizer, criterion, scheduler):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("The model will be running on", device, "device")
+
+    # Convert model parameters and buffers to CPU or Cuda
+    model.to(device)
+
+    for epoch in range(epochs):  # loop over the dataset multiple times
+        running_loss = run_over_training_set(model, device, optimizer, criterion)
+
+        valid_loss = run_over_validation_set(model, device, criterion)
+
+        display_epoch(model, epoch, optimizer, running_loss, valid_loss)
+
+        scheduler.step(running_loss)
+
+    return model
+
+def run_over_training_set(model, device, optimizer, criterion):
+    running_loss = 0.0
+
+    model.train()
+
+    for _, (images, labels) in enumerate(train_loader, 0):
+        images = images.to(device)
+        labels = labels.to(device)
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
     
-# Function to test a given dataset on the model. Returns the accuracy of the model on the images.
+    return running_loss
+
+def run_over_validation_set(model, device, criterion):
+    valid_loss = 0.0
+
+    model.eval()
+
+    for _, (images, labels) in enumerate(val_loader, 0):
+        images = images.to(device)
+        labels = labels.to(device)
+
+        # calulate validation loss
+        outputs = model(images)
+        vloss = criterion(outputs, labels)
+        valid_loss = vloss.item()*images.size(0)
+
+    return valid_loss
+
+# display_epoch displays information about each epoch
+def display_epoch(model, epoch, optimizer, running_loss, valid_loss):
+    valAccuracy = round(test(val_loader, model),3)
+
+    # Display model performance after each Epoch
+    print(f'Epoch {epoch+1}  -   Lr: {get_lr(optimizer)}'+
+        f'  -   Training Loss: {round(running_loss / len(train_loader),3)}'+
+        f'  -   Validation Loss: {round(valid_loss / len(val_loader),3)}'+
+        f'  -   Val Accuracy: {valAccuracy}%')
+
+
+# test will test a given dataset, data, on the given model and returns
+# the accuracy of the model on the images.
 def test(data, model):
     correct = 0
     total = 0
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     # Convert model parameters and buffers to CPU or Cuda
     model.to(device)
 
@@ -129,83 +206,29 @@ def test(data, model):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-
-    #print('Accuracy of the network on the 10000 test images: %d %%' % (
-    #    100 * correct / total))
     
     return (100 * correct / total)
 
-# Function to train the network. Takes the number of epochs and model as input and returns arrays later used to display diagrams of the loss
-def train(epoch_num, model,optimizer, criterion, scheduler):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print("The model will be running on", device, "device")
-    # Convert model parameters and buffers to CPU or Cuda
-    model.to(device)
-
-    for epoch in range(epoch_num):  # loop over the dataset multiple times
-        # run over the training set
-        running_loss = 0.0
-        model.train()
-        for i, (images, labels) in enumerate(train_loader, 0):
-            
-            # get the inputs; data is a list of [inputs, labels]
-            images = images.to(device)
-            labels = labels.to(device)
-            # zero the parameter gradients
-            optimizer.zero_grad()
-
-            # forward + backward + optimize
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            
-        # run over the validation set
-        valid_loss = 0.0
-        model.eval()
-        for i, (images, labels) in enumerate(val_loader, 0):
-            images = images.to(device)
-            labels = labels.to(device)
-
-            # calulate validation loss
-            outputs = model(images)
-            vloss = criterion(outputs, labels)
-            valid_loss = vloss.item()*images.size(0)
-
-        # get the accuracy of the model on the validation set
-        acc = round(test(val_loader, model),3)
 
 
-        # Display model performance after each Epoch
-        print(f'Epoch {epoch+1}  -   Lr: {get_lr(optimizer)}  -   Training Loss: {round(running_loss / len(train_loader),3)}  -   Validation Loss: {round(valid_loss / len(val_loader),3)}  -   Val Accuracy: {acc}%')
+# get_lr returns the current learning rate from a given optimizer.
+# Used in testing.
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
-        scheduler.step(running_loss)
-
-    return model
-
-
-def train_new_model():
-    net = Net(l1=400, l2=350)
-
-    optimizer, criterion, scheduler = optimLossSched(net, 0.001, 0.01)
-
-    # train the model with epoch number, model
-    net = train(200, net, optimizer, criterion, scheduler)
-    print('Finished Training') 
-
-    return net
-
+# load_existing_model takes a path to the model that should be loaded
+# and returns the model from that path.
 def load_exisiting_model(PATH):
-
     s_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(s_dir, PATH)
     model = torch.load(file_path)
+
     print("Model successfully loaded")
 
     return model
 
+# save_model stores the given model into the given path
 def save_model(model, PATH):
     s_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(s_dir, PATH)
